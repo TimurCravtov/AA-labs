@@ -2,8 +2,10 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import random
 import time
-from algorithm.kruskal import min_span_tree_kruskal
-from algorithm.prim import min_span_tree_prim
+import numpy as np
+
+from algorithm.dfs import dfs
+from algorithm.bfs import bfs
 
 def generate_connected_weighted_graph(num_nodes: int, num_edges: int, weight_range=(1, 10)) -> nx.Graph:
     if num_edges < num_nodes - 1:
@@ -11,10 +13,18 @@ def generate_connected_weighted_graph(num_nodes: int, num_edges: int, weight_ran
     if num_edges > num_nodes * (num_nodes - 1) // 2:
         raise ValueError("Too many edges for the number of nodes.")
 
-    while True:
-        G = nx.gnm_random_graph(num_nodes, num_edges)
-        if nx.is_connected(G):
-            break
+    G = nx.complete_graph(num_nodes)
+    edge_weights = {(u, v): random.random() for u, v in G.edges()}
+    nx.set_edge_attributes(G, edge_weights, 'weight')
+    T = nx.minimum_spanning_tree(G)
+    G = T.copy()
+
+    remaining_edges = num_edges - (num_nodes - 1)
+    all_possible_edges = list(nx.non_edges(G))
+
+    if remaining_edges > 0 and all_possible_edges:
+        selected_edges = random.sample(all_possible_edges, min(remaining_edges, len(all_possible_edges)))
+        G.add_edges_from(selected_edges)
 
     mapping = {i: f'v{i+1}' for i in range(num_nodes)}
     G = nx.relabel_nodes(G, mapping)
@@ -24,115 +34,49 @@ def generate_connected_weighted_graph(num_nodes: int, num_edges: int, weight_ran
 
     return G
 
-def measure_execution_time(algorithm, G):
+def run_traversal_benchmark(algorithm, graph, start_node):
     start_time = time.perf_counter()
-    algorithm(G)
+    algorithm(graph, start_node)
     return time.perf_counter() - start_time
 
-# Experiment parameters
-random.seed(42)
-repetitions = 3
+def benchmark_traversals(num_nodes, num_edges, repetitions):
+    dfs_times = []
+    bfs_times = []
 
-# Scenario 1: Increasing vertices, fixed edge density
-nodes_range = list(range(10, 51, 10))
-edge_density = 1.5
-kruskal_times_1 = []
-prim_times_1 = []
-for n in nodes_range:
-    e = int(n * edge_density)
-    kruskal_total = 0
-    prim_total = 0
     for _ in range(repetitions):
-        G = generate_connected_weighted_graph(n, e)
-        kruskal_total += measure_execution_time(min_span_tree_kruskal, G)
-        prim_total += measure_execution_time(min_span_tree_prim, G)
-    kruskal_times_1.append(kruskal_total / repetitions)
-    prim_times_1.append(prim_total / repetitions)
+        G = generate_connected_weighted_graph(num_nodes, num_edges)
+        start = list(G.nodes())[0]
+        dfs_times.append(run_traversal_benchmark(dfs, G, start))
+        bfs_times.append(run_traversal_benchmark(bfs, G, start))
 
-# Scenario 2: Increasing edges, fixed vertices
-fixed_nodes = 30
-max_edges = fixed_nodes * (fixed_nodes - 1) // 2
-edge_range = list(range(fixed_nodes - 1, max_edges, max_edges // 5))
-kruskal_times_2 = []
-prim_times_2 = []
-for e in edge_range:
-    kruskal_total = 0
-    prim_total = 0
-    for _ in range(repetitions):
-        G = generate_connected_weighted_graph(fixed_nodes, e)
-        kruskal_total += measure_execution_time(min_span_tree_kruskal, G)
-        prim_total += measure_execution_time(min_span_tree_prim, G)
-    kruskal_times_2.append(kruskal_total / repetitions)
-    prim_times_2.append(prim_total / repetitions)
+    return (np.mean(dfs_times), np.mean(bfs_times))
 
-# Scenario 3: Dense graphs
-nodes_range_dense = list(range(10, 51, 10))
-kruskal_times_3 = []
-prim_times_3 = []
-for n in nodes_range_dense:
-    e = n *2 # Simplified dense graph
-    kruskal_total = 0
-    prim_total = 0
-    for _ in range(repetitions):
-        G = generate_connected_weighted_graph(n, e)
-        kruskal_total += measure_execution_time(min_span_tree_kruskal, G)
-        prim_total += measure_execution_time(min_span_tree_prim, G)
-    kruskal_times_3.append(kruskal_total / repetitions)
-    prim_times_3.append(prim_total / repetitions)
+def main():
+    random.seed(42)
+    np.random.seed(42)
 
-# Scenario 4: Sparse graphs
-nodes_range_sparse = list(range(10, 51, 10))
-kruskal_times_4 = []
-prim_times_4 = []
-for n in nodes_range_sparse:
-    e = n
-    kruskal_total = 0
-    prim_total = 0
-    for _ in range(repetitions):
-        G = generate_connected_weighted_graph(n, e)
-        kruskal_total += measure_execution_time(min_span_tree_kruskal, G)
-        prim_total += measure_execution_time(min_span_tree_prim, G)
-    kruskal_times_4.append(kruskal_total / repetitions)
-    prim_times_4.append(prim_total / repetitions)
+    nodes = [10, 50, 100, 200, 300, 600, 1000]
+    edge_density = 1.5
+    repetitions = 5
 
-# Plotting
-fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+    dfs_results = []
+    bfs_results = []
 
-# Subgraph 1
-axs[0, 0].plot(nodes_range, kruskal_times_1, label="Kruskal", marker='o')
-axs[0, 0].plot(nodes_range, prim_times_1, label="Prim", marker='s')
-axs[0, 0].set_title("Edge Density (edges = nodes * 1.5)")
-axs[0, 0].set_xlabel("Vertices")
-axs[0, 0].set_ylabel("Time (s)")
-axs[0, 0].legend()
-axs[0, 0].grid(True)
+    for n in nodes:
+        e = int(n * edge_density)
+        dfs_time, bfs_time = benchmark_traversals(n, e, repetitions)
+        dfs_results.append(dfs_time)
+        bfs_results.append(bfs_time)
 
-# Subgraph 2
-axs[0, 1].plot(edge_range, kruskal_times_2, label="Kruskal", marker='o')
-axs[0, 1].plot(edge_range, prim_times_2, label="Prim", marker='s')
-axs[0, 1].set_title(f"Fixed Vertices (n = {fixed_nodes})")
-axs[0, 1].set_xlabel("Edges")
-axs[0, 1].set_ylabel("Time (s)")
-axs[0, 1].legend()
-axs[0, 1].grid(True)
+    plt.plot(nodes, dfs_results, label='DFS', marker='o')
+    plt.plot(nodes, bfs_results, label='BFS', marker='s')
+    plt.xlabel("Number of Nodes")
+    plt.ylabel("Time (s)")
+    plt.title("DFS vs BFS Traversal Time")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("traversal_benchmark.png", dpi=300)
 
-# Subgraph 3
-axs[1, 0].plot(nodes_range_dense, kruskal_times_3, label="Kruskal", marker='o')
-axs[1, 0].plot(nodes_range_dense, prim_times_3, label="Prim", marker='s')
-axs[1, 0].set_title("Dense Graphs (edges = nodes * 2)")
-axs[1, 0].set_xlabel("Vertices")
-axs[1, 0].set_ylabel("Time (s)")
-axs[1, 0].legend()
-axs[1, 0].grid(True)
-
-# Subgraph 4
-axs[1, 1].plot(nodes_range_sparse, kruskal_times_4, label="Kruskal", marker='o')
-axs[1, 1].plot(nodes_range_sparse, prim_times_4, label="Prim", marker='s')
-axs[1, 1].set_title("Sparse Graphs (edges = nodes)")
-axs[1, 1].set_xlabel("Vertices")
-axs[1, 1].set_ylabel("Time (s)")
-axs[1, 1].legend()
-axs[1, 1].grid(True)
-
-plt.tight_layout()
-plt.savefig('algorithm_performance_optimized.png')
+if __name__ == "__main__":
+    main()
